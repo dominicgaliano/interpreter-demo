@@ -1,6 +1,10 @@
 package lexer
 
-import "github.com/dominicgaliano/interpreter-demo/token"
+import (
+	"strings"
+
+	"github.com/dominicgaliano/interpreter-demo/token"
+)
 
 type Lexer struct {
 	input        string
@@ -26,8 +30,32 @@ func (l *Lexer) readChar() {
 	l.readPosition += 1
 }
 
+func (l *Lexer) readIdentifier() string {
+	var builder strings.Builder
+
+	for isLetter(l.ch) {
+		builder.WriteByte(l.ch)
+		l.readChar()
+	}
+
+	return builder.String()
+}
+
+func (l *Lexer) readNumber() string {
+	var builder strings.Builder
+
+	for isDigit(l.ch) {
+		builder.WriteByte(l.ch)
+		l.readChar()
+	}
+
+	return builder.String()
+}
+
 func (l *Lexer) NextToken() token.Token {
 	var tok token.Token
+
+	l.skipWhitespace()
 
 	switch l.ch {
 	case '=':
@@ -42,19 +70,75 @@ func (l *Lexer) NextToken() token.Token {
 		tok = newToken(token.COMMA, l.ch)
 	case '+':
 		tok = newToken(token.PLUS, l.ch)
+	case '-':
+		tok = newToken(token.MINUS, l.ch)
+	case '!':
+		tok = newToken(token.BANG, l.ch)
+	case '/':
+		tok = newToken(token.SLASH, l.ch)
+	case '*':
+		tok = newToken(token.ASTERISK, l.ch)
+	case '<':
+		tok = newToken(token.LT, l.ch)
+	case '>':
+		tok = newToken(token.GT, l.ch)
 	case '{':
 		tok = newToken(token.LBRACE, l.ch)
 	case '}':
 		tok = newToken(token.RBRACE, l.ch)
 	case 0:
-		tok.Literal = ""
-		tok.Type = token.EOF
+		tok = newToken(token.EOF, 0)
+	default:
+		// token is not a special character,
+		if isLetter(l.ch) {
+			// parse identifier
+			tok.Literal = l.readIdentifier()
+			tok.Type = token.LookupIdentifier(tok.Literal)
+			return tok
+		} else if isDigit(l.ch) {
+			// parse integer literal
+			tok.Type = token.INT
+			tok.Literal = l.readNumber()
+			return tok
+		} else {
+			tok = newToken(token.ILLEGAL, l.ch)
+		}
 	}
 
-    l.readChar()
-    return tok
+	l.readChar()
+	return tok
+}
+
+func isDigit(ch byte) bool {
+	return '0' <= ch && ch <= '9'
+}
+
+func isLetter(ch byte) bool {
+	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_'
+}
+
+func isWhitespace(ch byte) bool {
+	asciiWhitespaceMap := map[byte]bool{
+		32: true, // Space
+		9:  true, // Horizontal tab
+		10: true, // Newline
+		11: true, // Vertical tab
+		12: true, // Form feed
+		13: true, // Carriage return
+	}
+
+	return asciiWhitespaceMap[ch]
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {
-    return token.Token{Type: tokenType, Literal: string(ch)}
+	if ch == 0 {
+		return token.Token{Type: tokenType, Literal: ""}
+	}
+	return token.Token{Type: tokenType, Literal: string(ch)}
+}
+
+func (l *Lexer) skipWhitespace() {
+	for isWhitespace(l.ch) {
+		l.readChar()
+	}
 }

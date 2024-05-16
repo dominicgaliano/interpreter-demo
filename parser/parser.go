@@ -9,13 +9,51 @@ import (
 	"github.com/dominicgaliano/interpreter-demo/token"
 )
 
+// Precedence levels for parsing expressions.
+// The higher the number, the higher the precedence.
+// iota is used to create a sequence of increasing integer constants.
+// More info: https://go.dev/wiki/Iota
+// https://go.dev/ref/spec#Iota
+const (
+	_ int = iota
+	LOWEST
+	EQUALS      // ==
+	LESSGREATER // > or <
+	SUM         // +
+	PRODUCT     // *
+	PREFIX      // -X or !X
+	CALL        // myFunction(X)
+)
+
+// precedences map operator tokens to their respective precedence levels.
+var precedences = map[token.TokenType]int{
+	token.EQ:       EQUALS,
+	token.NOT_EQ:   EQUALS,
+	token.LT:       LESSGREATER,
+	token.GT:       LESSGREATER,
+	token.PLUS:     SUM,
+	token.MINUS:    SUM,
+	token.SLASH:    PRODUCT,
+	token.ASTERISK: PRODUCT,
+}
+
+// prefixParseFn is called when we encounter an associated token type in prefix
+// position. Ex. -x
+// infixParseFn is called when we encounter an associated token type in infix
+// positon. The function takes an expression equivalent to the "left side" of
+// operator being parsed. Ex. (left_expression) + 10
+// When an infixParseFn is called, the currToken should be the infix operator
+type (
+	prefixParseFn func() ast.Expression
+	infixParseFn  func(ast.Expression) ast.Expression
+)
+
 type Parser struct {
-	l *lexer.Lexer
+	l      *lexer.Lexer
+	errors []string
 
 	currToken token.Token
 	peekToken token.Token
-
-	errors []string
 
 	// maps tokens to appropriate prefix and infix parsers
 	prefixParseFns map[token.TokenType]prefixParseFn
@@ -25,18 +63,54 @@ type Parser struct {
 func New(l *lexer.Lexer) *Parser {
 	p := &Parser{l: l, errors: []string{}}
 
+	// Register prefix parsing functions
+	p.prefixParseFns = make(map[token.TokenType]prefixParseFn)
+	p.registerPrefix(token.IDENT, p.parseIdentifier)
+	p.registerPrefix(token.INT, p.parseIntegerLiteral)
+	p.registerPrefix(token.BANG, p.parsePrefixExpression)
+	p.registerPrefix(token.MINUS, p.parsePrefixExpression)
+
+	// Register infix parsing functions
+	p.infixParseFns = make(map[token.TokenType]infixParseFn)
+	p.registerInfix(token.PLUS, p.parseInfixExpression)
+	p.registerInfix(token.MINUS, p.parseInfixExpression)
+	p.registerInfix(token.SLASH, p.parseInfixExpression)
+	p.registerInfix(token.ASTERISK, p.parseInfixExpression)
+	p.registerInfix(token.EQ, p.parseInfixExpression)
+	p.registerInfix(token.NOT_EQ, p.parseInfixExpression)
+	p.registerInfix(token.LT, p.parseInfixExpression)
+	p.registerInfix(token.GT, p.parseInfixExpression)
+
 	// Read two tokens, so currToken and peekToken are set
 	p.nextToken()
 	p.nextToken()
 
-	// Register prefix parsing functions
-	p.prefixParseFns = make(map[token.TokenType]prefixParseFn)
-	p.registerPrefix(token.IDENT, p.parseIdentifier)
-    p.registerPrefix(token.INT, p.parseIntegerLiteral)
-    p.registerPrefix(token.BANG, p.parsePrefixExpression)
-    p.registerPrefix(token.MINUS, p.parsePrefixExpression)
-
 	return p
+}
+
+func (p *Parser) nextToken() {
+	p.currToken = p.peekToken
+	p.peekToken = p.l.NextToken()
+}
+
+func (p *Parser) currTokenIs(t token.TokenType) bool {
+	return p.currToken.Type == t
+}
+
+func (p *Parser) peekTokenIs(t token.TokenType) bool {
+	return p.peekToken.Type == t
+}
+
+// expectPeek checks if the next token is of the expected type.
+// If it is, it advances the tokens and returns true.
+// Otherwise, it returns false.
+func (p *Parser) expectPeek(t token.TokenType) bool {
+	if p.peekTokenIs(t) {
+		p.nextToken()
+		return true
+	}
+	p.peekError(t)
+	return false
 }
 
 func (p *Parser) Errors() []string {
@@ -49,9 +123,9 @@ func (p *Parser) peekError(t token.TokenType) {
 	p.errors = append(p.errors, msg)
 }
 
-func (p *Parser) nextToken() {
-	p.currToken = p.peekToken
-	p.peekToken = p.l.NextToken()
+func (p *Parser) noPrefixParserFnError(t token.TokenType) {
+	msg := fmt.Sprintf("no prefix parse function for %s found", t)
+	p.errors = append(p.errors, msg)
 }
 
 func (p *Parser) ParseProgram() *ast.Program {
@@ -101,26 +175,6 @@ func (p *Parser) parseLetStatement() ast.Statement {
 	return stmt
 }
 
-func (p *Parser) currTokenIs(t token.TokenType) bool {
-	return p.currToken.Type == t
-}
-
-func (p *Parser) peekTokenIs(t token.TokenType) bool {
-	return p.peekToken.Type == t
-}
-
-// expectPeek checks if the next token is of the expected type.
-// If it is, it advances the tokens and returns true.
-// Otherwise, it returns false.
-func (p *Parser) expectPeek(t token.TokenType) bool {
-	if p.peekTokenIs(t) {
-		p.nextToken()
-		return true
-	}
-	p.peekError(t)
-	return false
-}
-
 func (p *Parser) parseReturnStatement() ast.Statement {
 	stmt := &ast.ReturnStatement{Token: p.currToken}
 
@@ -133,26 +187,6 @@ func (p *Parser) parseReturnStatement() ast.Statement {
 	}
 
 	return stmt
-}
-
-// prefixParseFn is called when we encounter an associated token type in prefix
-// position. Ex. -x
-// infixParseFn is called when we encounter an associated token type in infix
-// positon. The function takes an expression equivalent to the "left side" of
-// operator being parsed. Ex. (left_expression) + 10
-type (
-	prefixParseFn func() ast.Expression
-	infixParseFn  func(ast.Expression) ast.Expression
-)
-
-// helper functions to register prefix and infix parsing functions associated
-// with tokenType.
-func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {
-	p.prefixParseFns[tokenType] = fn
-}
-
-func (p *Parser) registerInfix(tokenType token.TokenType, fn infixParseFn) {
-	p.infixParseFns[tokenType] = fn
 }
 
 // An expression statement is a statement that consists of a single expression.
@@ -169,39 +203,32 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 	return stmt
 }
 
-// Precedence levels for parsing expressions.
-// The higher the number, the higher the precedence.
-// iota is used to create a sequence of increasing integer constants.
-// More info: https://go.dev/wiki/Iota
-// https://go.dev/ref/spec#Iota
-const (
-	_ int = iota
-	LOWEST
-	EQUALS      // ==
-	LESSGREATER // > or <
-	SUM         // +
-	PRODUCT     // *
-	PREFIX      // -X or !X
-	CALL        // myFunction(X)
-)
-
 // parseExpression parses an expression based on the precedence of the current
 // token. It uses the precedence of the current token to determine which parsing
 // function to call.
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	prefix := p.prefixParseFns[p.currToken.Type]
 	if prefix == nil {
-        p.noPrefixParserFnError(p.currToken.Type)
+		p.noPrefixParserFnError(p.currToken.Type)
 		return nil
 	}
 
 	leftExp := prefix()
-	return leftExp
-}
 
-func (p *Parser) noPrefixParserFnError(t token.TokenType) {
-    msg := fmt.Sprintf("no prefix parse function for %s found", t)
-    p.errors = append(p.errors, msg)
+	// currToken is the first token after any prefixes
+	for !p.peekTokenIs(token.SEMICOLON) && precedence < p.peekPrecedence() {
+		infix := p.infixParseFns[p.peekToken.Type]
+		if infix == nil {
+			return leftExp
+		}
+
+		p.nextToken()
+
+		leftExp = infix(leftExp)
+
+	}
+
+	return leftExp
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
@@ -225,14 +252,57 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {
-    expression := &ast.PrefixExpression{
-        Token: p.currToken,
-        Operator: p.currToken.Literal,
-    }
+	expression := &ast.PrefixExpression{
+		Token:    p.currToken,
+		Operator: p.currToken.Literal,
+	}
 
-    p.nextToken()
+	p.nextToken()
 
-    expression.Right = p.parseExpression(PREFIX)
+	expression.Right = p.parseExpression(PREFIX)
 
-    return expression
+	return expression
 }
+
+func (p *Parser) peekPrecedence() int {
+	if p, ok := precedences[p.peekToken.Type]; ok {
+		return p
+	}
+
+	// Fallback
+	return LOWEST
+}
+
+func (p *Parser) currPrecedence() int {
+	if p, ok := precedences[p.currToken.Type]; ok {
+		return p
+	}
+
+	// Fallback
+	return LOWEST
+}
+
+func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
+	expression := &ast.InfixExpression{
+		Token:    p.currToken,
+		Operator: p.currToken.Literal,
+		Left:     left,
+	}
+
+	precedence := p.currPrecedence()
+	p.nextToken()
+	expression.Right = p.parseExpression(precedence)
+
+	return expression
+}
+
+// helper functions to register prefix and infix parsing functions associated
+// with tokenType.
+func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {
+	p.prefixParseFns[tokenType] = fn
+}
+
+func (p *Parser) registerInfix(tokenType token.TokenType, fn infixParseFn) {
+	p.infixParseFns[tokenType] = fn
+}
+

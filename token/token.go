@@ -31,8 +31,8 @@ const (
 	COMMA     = ","
 	SEMICOLON = ";"
 
-	LPAREN = "{"
-	RPAREN = "}"
+	LPAREN = "("
+	RPAREN = ")"
 	LBRACE = "{"
 	RBRACE = "}"
 

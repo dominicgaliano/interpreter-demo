@@ -210,3 +210,50 @@ func (b *Boolean) TokenLiteral() string { return b.Token.Literal }
 func (b *Boolean) String() string {
 	return b.Token.Literal
 }
+
+// IfExpression represents an if expression in the AST.
+// The condition is an expression that evaluates to a boolean value.
+// The consequence and alternative are block statements that are executed
+// based on the value of the condition.
+// The alternative BlockStatement is optional.
+type IfExpression struct {
+	Token       token.Token // the if token, token.IF
+	Condition   Expression
+	Consequence *BlockStatement
+	Alternative *BlockStatement
+}
+
+func (ie *IfExpression) expressionNode()      {}
+func (ie *IfExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IfExpression) String() string {
+	var out bytes.Buffer
+
+	out.WriteString("if")
+	out.WriteString(ie.Condition.String())
+	out.WriteString(" ")
+	out.WriteString(ie.Consequence.String())
+
+	if ie.Alternative != nil {
+		out.WriteString("else ")
+		out.WriteString(ie.Alternative.String())
+	}
+
+	return out.String()
+}
+
+type BlockStatement struct {
+	Token      token.Token // the { token
+	Statements []Statement
+}
+
+func (bs *BlockStatement) statementNode()       {}
+func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
+func (bs *BlockStatement) String() string {
+	var out bytes.Buffer
+
+	for _, stmt := range bs.Statements {
+		out.WriteString(stmt.String())
+	}
+
+	return out.String()
+}

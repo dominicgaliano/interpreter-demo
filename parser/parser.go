@@ -35,6 +35,7 @@ var precedences = map[token.TokenType]int{
 	token.MINUS:    SUM,
 	token.SLASH:    PRODUCT,
 	token.ASTERISK: PRODUCT,
+    token.LPAREN: CALL,
 }
 
 // prefixParseFn is called when we encounter an associated token type in prefix
@@ -85,6 +86,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.NOT_EQ, p.parseInfixExpression)
 	p.registerInfix(token.LT, p.parseInfixExpression)
 	p.registerInfix(token.GT, p.parseInfixExpression)
+    p.registerInfix(token.LPAREN, p.parseCallExpression)
 
 	// Read two tokens, so currToken and peekToken are set
 	p.nextToken()
@@ -414,6 +416,37 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 	}
 
 	return identifiers
+}
+
+func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
+    callExpression := &ast.CallExpression{ Token: p.currToken, Function: function }
+    callExpression.Arguments = p.parseCallArguments()
+
+    return callExpression
+}
+
+func (p *Parser) parseCallArguments() []ast.Expression {
+    args := []ast.Expression{}
+
+    if p.peekTokenIs(token.RPAREN) {
+        p.nextToken()
+        return args
+    }
+    
+    p.nextToken()
+    args = append(args, p.parseExpression(LOWEST))
+
+    for p.peekTokenIs(token.COMMA) {
+        p.nextToken()
+        p.nextToken()
+        args = append(args, p.parseExpression(LOWEST))
+    }
+
+    if !p.expectPeek(token.RPAREN) {
+        return nil
+    }
+
+    return args
 }
 
 // helper functions to register prefix and infix parsing functions associated with tokenType.

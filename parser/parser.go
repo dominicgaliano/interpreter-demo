@@ -73,6 +73,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.FALSE, p.parseBoolean)
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(token.IF, p.parseIfExpression)
+	p.registerPrefix(token.FUNCTION, p.parseFunctionLiteral)
 
 	// Register infix parsing functions
 	p.infixParseFns = make(map[token.TokenType]infixParseFn)
@@ -317,60 +318,103 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	return exp
 }
 
-func (p* Parser) parseIfExpression() ast.Expression {
-    expression := &ast.IfExpression{Token: p.currToken}
+func (p *Parser) parseIfExpression() ast.Expression {
+	expression := &ast.IfExpression{Token: p.currToken}
 
-    if !p.expectPeek(token.LPAREN) {
-        return nil
-    }
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
 
-    p.nextToken()
-    expression.Condition = p.parseExpression(LOWEST)
-    if !p.expectPeek(token.RPAREN) {
-        return nil
-    }
+	p.nextToken()
+	expression.Condition = p.parseExpression(LOWEST)
+	if !p.expectPeek(token.RPAREN) {
+		return nil
+	}
 
-    if !p.expectPeek(token.LBRACE) {
-        return nil
-    }
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
 
-    // parse consequence
-    expression.Consequence = p.parseBlockStatement()
+	// parse consequence
+	expression.Consequence = p.parseBlockStatement()
 
-    // parse (optional) alternative BlockStatement
-    if p.peekTokenIs(token.ELSE) {
-        p.nextToken() 
+	// parse (optional) alternative BlockStatement
+	if p.peekTokenIs(token.ELSE) {
+		p.nextToken()
 
-        if !p.expectPeek(token.LBRACE) {
-            return nil
-        }
+		if !p.expectPeek(token.LBRACE) {
+			return nil
+		}
 
-        expression.Alternative = p.parseBlockStatement()
+		expression.Alternative = p.parseBlockStatement()
 
-    }
+	}
 
-
-    return expression
+	return expression
 }
 
-func (p* Parser) parseBlockStatement() *ast.BlockStatement {
-    block := &ast.BlockStatement{Token: p.currToken}
-    block.Statements = []ast.Statement{}
+func (p *Parser) parseBlockStatement() *ast.BlockStatement {
+	block := &ast.BlockStatement{Token: p.currToken}
+	block.Statements = []ast.Statement{}
 
-    p.nextToken()
+	p.nextToken()
 
-    for !p.currTokenIs(token.RBRACE) && !p.currTokenIs(token.EOF) {
-        stmt := p.parseStatement()
-        if stmt != nil {
-            block.Statements = append(block.Statements, stmt)
-        }
-        p.nextToken()
-    }
+	for !p.currTokenIs(token.RBRACE) && !p.currTokenIs(token.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+	}
 
-    return block
+	return block
 }
 
-// TODO: create parseBlockExpression (pg. 87)
+func (p *Parser) parseFunctionLiteral() ast.Expression {
+	lit := &ast.FunctionLiteral{Token: p.currToken}
+
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+
+	lit.Parameters = p.parseFunctionParameters() // ends on ')'
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+
+	lit.Body = p.parseBlockStatement()
+
+	return lit
+}
+
+func (p *Parser) parseFunctionParameters() []*ast.Identifier {
+	identifiers := []*ast.Identifier{}
+
+	// no parameters
+	if p.peekTokenIs(token.RPAREN) {
+		p.nextToken()
+		return identifiers
+	}
+
+	p.nextToken()
+
+	ident := &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+	identifiers = append(identifiers, ident)
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		ident := &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+		identifiers = append(identifiers, ident)
+	}
+
+	if !p.expectPeek(token.RPAREN) {
+		return nil
+	}
+
+	return identifiers
+}
 
 // helper functions to register prefix and infix parsing functions associated with tokenType.
 func (p *Parser) registerPrefix(tokenType token.TokenType, fn prefixParseFn) {

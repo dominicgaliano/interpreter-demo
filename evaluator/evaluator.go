@@ -33,12 +33,12 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 			return val
 		}
 		return &object.ReturnValue{Value: val}
-    case *ast.LetStatement:
-        val := Eval(node.Value, env)
-        if isError(val) {
-            return val
-        }
-        env.Set(node.Name.Value, val)
+	case *ast.LetStatement:
+		val := Eval(node.Value, env)
+		if isError(val) {
+			return val
+		}
+		env.Set(node.Name.Value, val)
 
 	// Expressions
 	case *ast.IntegerLiteral:
@@ -68,8 +68,23 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 
 	case *ast.IfExpression:
 		return evalIfExpression(node, env)
-    case *ast.Identifier:
-        return evalIdentifier(node, env)
+	case *ast.Identifier:
+		return evalIdentifier(node, env)
+	case *ast.FunctionLiteral:
+		params := node.Parameters
+		body := node.Body
+		return &object.Function{Parameters: params, Body: body, Env: env}
+	case *ast.CallExpression:
+		function := Eval(node.Function, env)
+		if isError(function) {
+			return function
+		}
+		args := evalExpressions(node.Arguments, env)
+		if len(args) == 1 && isError(args[0]) {
+			return args[0]
+		}
+
+		return applyFunction(function, args)
 	}
 
 	return nil
@@ -224,9 +239,9 @@ func evalIfExpression(node *ast.IfExpression, env *object.Environment) object.Ob
 	// if node.Alternative is not null, eval and return node.Alternative
 
 	condition := Eval(node.Condition, env)
-    if isError(condition) {
-        return condition
-    }
+	if isError(condition) {
+		return condition
+	}
 
 	if isTruthy(condition) {
 		return Eval(node.Consequence, env)
@@ -269,10 +284,63 @@ func isError(obj object.Object) bool {
 }
 
 func evalIdentifier(node *ast.Identifier, env *object.Environment) object.Object {
-    val, ok := env.Get(node.Value)
-    if !ok {
-        return newError("identifier not found: " + node.Value)
-    }
-    return val
+	val, ok := env.Get(node.Value)
+	if !ok {
+		return newError("identifier not found: " + node.Value)
+	}
+	return val
 }
 
+func evalExpressions(exps []ast.Expression, env *object.Environment) []object.Object {
+	result := []object.Object{}
+	for _, exp := range exps {
+		evaluated := Eval(exp, env)
+		if isError(evaluated) {
+			return []object.Object{evaluated}
+		}
+		result = append(result, evaluated)
+	}
+	return result
+}
+
+func applyFunction(fn object.Object, args []object.Object) object.Object {
+	function, ok := fn.(*object.Function)
+	if !ok {
+		return newError("not a function: %s", fn.Type())
+	}
+
+	// raise an error if not enough arguments are passed
+	// allows for more arguments than defined to be passed and ignored
+	if len(function.Parameters) > len(args) {
+		return newError("function call missing arguments, got=%d, expected=%d",
+			len(args),
+			len(function.Parameters))
+	}
+
+	extendedEnv := extendFunctionEnv(function, args)
+	evaluated := Eval(function.Body, extendedEnv)
+	return unwrapReturnValue(evaluated)
+}
+
+func extendFunctionEnv(
+	fn *object.Function,
+	args []object.Object,
+) *object.Environment {
+	env := object.NewEnclosedEnviroment(fn.Env)
+
+	// Set function parameter values in new environment
+	for paramId, param := range fn.Parameters {
+		env.Set(param.Value, args[paramId])
+	}
+
+	return env
+}
+
+func unwrapReturnValue(obj object.Object) object.Object {
+	if returnValue, ok := obj.(*object.ReturnValue); ok {
+		return returnValue.Value
+	}
+
+	// allows for implicit return
+	return obj
+}
